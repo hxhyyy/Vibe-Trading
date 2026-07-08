@@ -96,6 +96,18 @@ class GovernedToolRegistry:
     def __len__(self) -> int:
         return len(getattr(self.inner, "tool_names", []))
 
+    @property
+    def _tools(self) -> dict[str, Any]:
+        """Expose wrapped tool map for legacy callers (e.g. ContextBuilder)."""
+        tools = getattr(self.inner, "_tools", None)
+        if isinstance(tools, dict):
+            return tools
+        return {
+            name: tool
+            for name in self.tool_names
+            if (tool := self.get(name)) is not None
+        }
+
 
 def govern_registry(
     registry: Any,

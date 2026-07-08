@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 from pydantic import PrivateAttr
 
+from src.providers.api_key_failover import ApiKeyFailoverLLM, split_api_keys
 from src.providers.capabilities import get_provider_capabilities, provider_env_names
 
 try:
@@ -381,11 +382,23 @@ def _deepseek_adapter_mode() -> str:
     return aliases.get(mode, mode or "auto")
 
 
+def _resolve_provider_api_keys(provider: str, model: str) -> list[str]:
+    """Return deduplicated API keys for the active provider."""
+    if provider in {"openai-codex", "openai_codex"}:
+        return []
+    key_env, _ = provider_env_names(provider, model)
+    if key_env is None:
+        return split_api_keys(os.getenv("OPENAI_API_KEY", "") or "ollama")
+    raw = os.getenv(key_env, "") or os.getenv("OPENAI_API_KEY", "")
+    return split_api_keys(raw)
+
+
 def _build_native_deepseek(
     *,
     model: str,
     temperature: float,
     callbacks: Any = None,
+    api_key: str | None = None,
 ) -> Any | None:
     """Build the optional native DeepSeek adapter when installed.
 
@@ -401,7 +414,7 @@ def _build_native_deepseek(
         return None
 
     key_env, base_env = provider_env_names("deepseek", model)
-    api_key = os.getenv(key_env or "", "") or os.getenv("OPENAI_API_KEY", "")
+    resolved_key = api_key or os.getenv(key_env or "", "") or os.getenv("OPENAI_API_KEY", "")
     base_url = os.getenv(base_env, "") or os.getenv("OPENAI_BASE_URL", "") or os.getenv("OPENAI_API_BASE", "")
     return chat_deepseek(
         model=model,
@@ -409,9 +422,52 @@ def _build_native_deepseek(
         timeout=int(os.getenv("TIMEOUT_SECONDS", "120")),
         max_retries=int(os.getenv("MAX_RETRIES", "2")),
         callbacks=callbacks,
-        api_key=api_key or None,
+        api_key=resolved_key or None,
         base_url=base_url or None,
     )
+
+
+def _build_openai_compatible_llm(
+    *,
+    name: str,
+    temperature: float,
+    provider: str,
+    caps: Any,
+    callbacks: Any = None,
+    api_key: str,
+    langchain_retries: bool = True,
+) -> Any:
+    """Construct a ChatOpenAI-compatible adapter for one API key."""
+    if ChatOpenAI is None:
+        raise RuntimeError("langchain-openai is not installed")
+    if provider == "minimax" and temperature <= 0.0:
+        temperature = 0.01
+    if caps.name == "moonshot" and name.lower().startswith("kimi-k2") and temperature != 1.0:
+        logger.info("Forcing temperature=1.0 for %s (provider requirement)", name)
+        temperature = 1.0
+    effort = os.getenv("LANGCHAIN_REASONING_EFFORT", "").strip().lower()
+    base_url = os.getenv("OPENAI_BASE_URL", "") or os.getenv("OPENAI_API_BASE", "")
+    max_retries = int(os.getenv("MAX_RETRIES", "2")) if langchain_retries else 0
+    kwargs: dict[str, Any] = {
+        "model": name,
+        "temperature": temperature,
+        "timeout": int(os.getenv("TIMEOUT_SECONDS", "120")),
+        "max_retries": max_retries,
+        "callbacks": callbacks,
+        "api_key": api_key,
+        "extra_body": {"reasoning": {"effort": effort}} if effort and caps.openrouter_reasoning_body else None,
+        "vibe_provider": provider,
+    }
+    if base_url:
+        kwargs["base_url"] = base_url
+    if caps.default_headers:
+        headers = dict(caps.default_headers)
+        if caps.name == "moonshot":
+            custom_ua = os.getenv("MOONSHOT_USER_AGENT", "").strip()
+            if custom_ua:
+                headers["User-Agent"] = custom_ua
+        kwargs["default_headers"] = headers
+    return ChatOpenAIWithReasoning(**kwargs)
 
 
 def _load_env_file(path: Path) -> None:
@@ -484,9 +540,12 @@ def _sync_provider_env() -> None:
 
     # Resolve API key: provider-specific env → OPENAI_API_KEY fallback
     if key_env is not None:
-        api_key = os.getenv(key_env, "") or os.getenv("OPENAI_API_KEY", "")
+        raw_key = os.getenv(key_env, "") or os.getenv("OPENAI_API_KEY", "")
+        keys = split_api_keys(raw_key)
+        api_key = keys[0] if keys else ""
     else:
-        api_key = os.getenv("OPENAI_API_KEY", "") or "ollama"
+        keys = split_api_keys(os.getenv("OPENAI_API_KEY", "") or "ollama")
+        api_key = keys[0] if keys else "ollama"
 
     # Resolve base URL: provider-specific env → OPENAI_BASE_URL fallback
     base_url = os.getenv(base_env, "") or os.getenv("OPENAI_BASE_URL", "") or os.getenv("OPENAI_API_BASE", "")
@@ -494,7 +553,9 @@ def _sync_provider_env() -> None:
         base_url = _normalize_ollama_base_url(base_url)
 
     if api_key:
-        os.environ["OPENAI_API_KEY"] = api_key
+        # Preserve pipe-separated multi-key values on OPENAI_API_KEY for failover.
+        if key_env != "OPENAI_API_KEY" or len(keys) <= 1:
+            os.environ["OPENAI_API_KEY"] = api_key
     if base_url:
         os.environ["OPENAI_API_BASE"] = base_url
         os.environ.setdefault("OPENAI_BASE_URL", base_url)
@@ -594,49 +655,45 @@ def build_llm(*, model_name: Optional[str] = None, callbacks: Any = None) -> Any
             reasoning_effort=effort or None,
         )
 
+    api_keys = _resolve_provider_api_keys(provider, name)
+
+    def openai_factory(api_key: str) -> Any:
+        return _build_openai_compatible_llm(
+            name=name,
+            temperature=temperature,
+            provider=provider,
+            caps=caps,
+            callbacks=callbacks,
+            api_key=api_key,
+            langchain_retries=len(api_keys) <= 1,
+        )
+
     if provider == "deepseek":
         adapter_mode = _deepseek_adapter_mode()
-        if adapter_mode != "openai-compatible":
-            native_llm = _build_native_deepseek(
-                model=name,
-                temperature=temperature,
-                callbacks=callbacks,
-            )
-            if native_llm is not None:
-                return native_llm
-            if adapter_mode == "native":
-                raise RuntimeError(
-                    "VIBE_TRADING_DEEPSEEK_ADAPTER=native requires langchain-deepseek"
-                )
 
-    if ChatOpenAI is None:
-        raise RuntimeError("langchain-openai is not installed")
-    # MiniMax requires temperature in (0.0, 1.0] — clamp to 0.01 when the
-    # default 0.0 is used to avoid an API validation error.
-    if provider == "minimax" and temperature <= 0.0:
-        temperature = 0.01
-    # Moonshot kimi-k2.x reasoning models reject any temperature other than 1
-    # ("invalid temperature: only 1 is allowed for this model").
-    if caps.name == "moonshot" and name.lower().startswith("kimi-k2") and temperature != 1.0:
-        logger.info("Forcing temperature=1.0 for %s (provider requirement)", name)
-        temperature = 1.0
-    # Optional reasoning activation for relays requiring opt-in (e.g. OpenRouter).
-    # Moonshot/DeepSeek official APIs emit reasoning by default and ignore this field.
-    effort = os.getenv("LANGCHAIN_REASONING_EFFORT", "").strip().lower()
-    kwargs: dict[str, Any] = {
-        "model": name,
-        "temperature": temperature,
-        "timeout": int(os.getenv("TIMEOUT_SECONDS", "120")),
-        "max_retries": int(os.getenv("MAX_RETRIES", "2")),
-        "callbacks": callbacks,
-        "extra_body": {"reasoning": {"effort": effort}} if effort and caps.openrouter_reasoning_body else None,
-        "vibe_provider": provider,
-    }
-    if caps.default_headers:
-        headers = dict(caps.default_headers)
-        if caps.name == "moonshot":
-            custom_ua = os.getenv("MOONSHOT_USER_AGENT", "").strip()
-            if custom_ua:
-                headers["User-Agent"] = custom_ua
-        kwargs["default_headers"] = headers
-    return ChatOpenAIWithReasoning(**kwargs)
+        def deepseek_factory(api_key: str) -> Any:
+            if adapter_mode != "openai-compatible":
+                native_llm = _build_native_deepseek(
+                    model=name,
+                    temperature=temperature,
+                    callbacks=callbacks,
+                    api_key=api_key,
+                )
+                if native_llm is not None:
+                    return native_llm
+                if adapter_mode == "native":
+                    raise RuntimeError(
+                        "VIBE_TRADING_DEEPSEEK_ADAPTER=native requires langchain-deepseek"
+                    )
+            return openai_factory(api_key)
+
+        if len(api_keys) > 1:
+            return ApiKeyFailoverLLM(deepseek_factory, api_keys, provider, name)
+        single_key = api_keys[0] if api_keys else (os.getenv("OPENAI_API_KEY", "") or "")
+        return deepseek_factory(single_key)
+
+    if len(api_keys) > 1:
+        return ApiKeyFailoverLLM(openai_factory, api_keys, provider, name)
+
+    single_key = api_keys[0] if api_keys else (os.getenv("OPENAI_API_KEY", "") or "ollama")
+    return openai_factory(single_key)
