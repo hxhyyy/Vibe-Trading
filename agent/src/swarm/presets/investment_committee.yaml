@@ -44,7 +44,13 @@ agents:
       7. **Main risk to the bull case** — Honestly list 2–3 scenarios that would invalidate the bull thesis
 
       Use factor_analysis for quant support; use load_skill for frameworks.
-    tools: [bash, read_file, write_file, load_skill, get_market_data, factor_analysis]
+
+      ## DATA INTEGRITY (MANDATORY)
+      - NEVER fabricate, guess, or rely on memory for numbers (prices, holdings, financials, dates). Every quantitative claim MUST come from a tool call in THIS run.
+      - If get_market_data fails, returns only metadata, or returns empty/stale data, you MUST fall back to web_search to find the real, current figures (e.g. "MSTR bitcoin holdings 2026", "MSTR latest stock price").
+      - If after web_search you still cannot obtain a specific number, explicitly write "DATA UNAVAILABLE" for that item — do NOT invent a plausible-looking value.
+      - Always state the source and as-of date for key figures.
+    tools: [bash, read_file, write_file, load_skill, get_market_data, factor_analysis, web_search]
     skills: [technical-basic, fundamental-filter, yfinance, earnings-revision, sentiment-analysis]
     max_iterations: 50
     timeout_seconds: 1800
@@ -97,7 +103,13 @@ agents:
       7. **What would disprove the bear case** — Signals that would invalidate the bear thesis (i.e., bull-side rebuttal points)
 
       Use factor_analysis for risk-factor views; use load_skill for risk frameworks.
-    tools: [bash, read_file, write_file, load_skill, get_market_data, factor_analysis]
+
+      ## DATA INTEGRITY (MANDATORY)
+      - NEVER fabricate, guess, or rely on memory for numbers (prices, holdings, financials, dates). Every quantitative claim MUST come from a tool call in THIS run.
+      - If get_market_data fails, returns only metadata, or returns empty/stale data, you MUST fall back to web_search to find the real, current figures (e.g. "MSTR bitcoin holdings 2026", "MSTR latest stock price").
+      - If after web_search you still cannot obtain a specific number, explicitly write "DATA UNAVAILABLE" for that item — do NOT invent a plausible-looking value.
+      - Always state the source and as-of date for key figures.
+    tools: [bash, read_file, write_file, load_skill, get_market_data, factor_analysis, web_search]
     skills: [technical-basic, fundamental-filter, yfinance, risk-analysis, volatility]
     max_iterations: 50
     timeout_seconds: 1800
@@ -149,7 +161,7 @@ agents:
       7. **Risk conditions** — If approval is conditional, state prerequisites (e.g., wait for earnings)
 
       Stay independent; do not cheerlead either side; optimize portfolio-level risk.
-    tools: [bash, read_file, write_file, load_skill]
+    tools: [bash, read_file, write_file, load_skill, web_search]
     skills: [risk-analysis, volatility, correlation-analysis]
     max_iterations: 50
     timeout_seconds: 1800
@@ -196,7 +208,7 @@ agents:
       7. **Backtest summary** — If run: historical win rate, mean return, max drawdown
 
       Decisions must be executable; reject vague “it depends.” Every key number must be explicit.
-    tools: [bash, read_file, write_file, load_skill, backtest]
+    tools: [bash, read_file, write_file, load_skill, backtest, web_search]
     skills: [strategy-generate, asset-allocation]
     max_iterations: 50
     timeout_seconds: 1800

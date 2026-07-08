@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { memo } from "react";
+import { memo, useEffect, useRef } from "react";
 import {
   CheckCircle2,
   Circle,
@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { ProgressBar } from "@/components/chat/ProgressBar";
 import { localizeToolName } from "@/lib/tools";
-import type { SwarmAgentDisplayStatus, SwarmRunStatus } from "@/types/agent";
+import type { SwarmAgentDisplayStatus, SwarmAgentStatus, SwarmRunStatus } from "@/types/agent";
 
 interface Props {
   status: SwarmRunStatus;
@@ -170,7 +170,55 @@ export const SwarmStatusCard = memo(function SwarmStatusCard({ status }: Props) 
             </div>
           </div>
         </div>
+
+        {status.agents.some((agent) => agent.transcript) && (
+          <div className="mt-4 space-y-3 border-t pt-3">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {t('swarmStatus.output')}
+            </div>
+            {status.agents
+              .filter((agent) => agent.transcript)
+              .map((agent) => (
+                <AgentTranscript key={`tx-${agent.taskId || agent.agentId}`} agent={agent} />
+              ))}
+          </div>
+        )}
       </div>
     </div>
   );
 });
+
+function AgentTranscript({ agent }: { agent: SwarmAgentStatus }) {
+  const initial = (agent.agentId || "?").charAt(0).toUpperCase();
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    // Keep the newest streamed text in view while the agent is still running.
+    if (agent.status === "running") el.scrollTop = el.scrollHeight;
+  }, [agent.transcript, agent.status]);
+
+  return (
+    <div className="flex gap-2">
+      <div className={["flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold", statusTone(agent.status)].join(" ")}>
+        {initial}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-xs font-semibold text-foreground">{agent.agentId}</span>
+          {agent.role && <span className="truncate text-[10px] text-muted-foreground">{agent.role}</span>}
+        </div>
+        <div
+          ref={bodyRef}
+          className="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-muted/40 px-3 py-2 text-xs leading-relaxed text-foreground"
+        >
+          {agent.transcript}
+          {agent.status === "running" && (
+            <span className="inline-block h-3.5 w-0.5 translate-y-0.5 animate-pulse bg-primary" />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

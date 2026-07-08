@@ -22,6 +22,8 @@ export interface SwarmAgentStatus {
   iterations?: number;
   startedAt?: number;
   lastText?: string;
+  /** Full streamed output accumulated from worker_text deltas (chat-like transcript). */
+  transcript?: string;
   error?: string;
   layer?: number;
 }

@@ -202,13 +202,18 @@ export function applySwarmEvent(current: SwarmRunStatus, rawEvent: unknown, now 
   }
 
   if (type === "worker_text") {
-    const content = asString(data.content).trim();
-    const lastLine = content.split("\n").map((line) => line.trim()).filter(Boolean).pop();
-    if (!lastLine) return current;
-    return updateAgent(current, { agentId, taskId }, (agent) => ({
-      ...agent,
-      lastText: lastLine.slice(0, 160),
-    }));
+    const delta = asString(data.content);
+    if (!delta) return current;
+    return updateAgent(current, { agentId, taskId }, (agent) => {
+      const transcript = ((agent.transcript ?? "") + delta).slice(-20000);
+      const lastLine = transcript.split("\n").map((line) => line.trim()).filter(Boolean).pop();
+      return {
+        ...agent,
+        status: agent.status === "waiting" ? "running" : agent.status,
+        transcript,
+        lastText: lastLine ? lastLine.slice(0, 160) : agent.lastText,
+      };
+    });
   }
 
   if (type === "task_completed" || type === "worker_completed") {

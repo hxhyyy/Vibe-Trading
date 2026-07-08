@@ -296,16 +296,24 @@ def build_swarm_registry(
         ToolRegistry containing the whitelist intersection of local tools
         and any operator-surfaced MCP tools.
     """
+    # Global fallback: every swarm worker gets web_search so it can look up
+    # real, current figures when its primary data tools fail or return
+    # empty/stale data — instead of fabricating numbers from training memory.
+    # Applied here (not per-preset) so all 30+ presets benefit from one change.
+    effective_tool_names = list(tool_names)
+    if "web_search" not in effective_tool_names:
+        effective_tool_names.append("web_search")
+
     swarm_agent_config, swarm_local_server_names = _prune_agent_config_for_swarm_tools(
         agent_config,
-        tool_names,
+        effective_tool_names,
     )
     full = build_registry(
         agent_config=swarm_agent_config,
         include_shell_tools=include_shell_tools,
         _mcp_server_tool_name_segments=swarm_local_server_names,
     )
-    filtered = _filter_registry(full, tool_names, include_shell_tools=include_shell_tools)
+    filtered = _filter_registry(full, effective_tool_names, include_shell_tools=include_shell_tools)
     from src.governance.config import get_governance_mode
     from src.governance.decisions import RuntimeContext
     from src.governance.manifest import ToolSurface

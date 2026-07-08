@@ -1162,7 +1162,7 @@ export function Agent() {
   return (
     <div className="flex flex-col flex-1 min-w-0 overflow-hidden h-full">
       <div ref={listRef} className="flex-1 overflow-auto p-6 scroll-smooth relative">
-        <div className="max-w-3xl mx-auto space-y-4">
+        <div className="max-w-5xl mx-auto space-y-4">
           {sessionLoading && (
             <div className="space-y-4 py-4">
               {[1, 2, 3].map(i => (
@@ -1278,7 +1278,7 @@ export function Agent() {
       </div>
 
       <form onSubmit={handleSubmit} className="border-t p-4 bg-background/80 backdrop-blur-sm">
-        <div className="max-w-3xl mx-auto space-y-2">
+        <div className="max-w-5xl mx-auto space-y-2">
           {/* Swarm preset badge */}
           {swarmPreset && (
             <div className="flex items-center gap-1">
