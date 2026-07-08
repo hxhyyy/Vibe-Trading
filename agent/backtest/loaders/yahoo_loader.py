@@ -26,6 +26,8 @@ from backtest.loaders.registry import register
 logger = logging.getLogger(__name__)
 
 _OHLCV_COLUMNS = ("open", "high", "low", "close", "volume")
+_AVAILABILITY_PROBE_TTL_S = 300.0
+_availability_cache: tuple[float, bool] | None = None
 
 # Project interval -> Yahoo chart interval. Daily is the only granularity this
 # loader exposes for equities; anything else falls back to lowercasing so an
@@ -162,8 +164,28 @@ class DataLoader:
     requires_auth = False
 
     def is_available(self) -> bool:
-        """Always available — uses the throttled public HTTP client."""
-        return True
+        """Return whether Yahoo chart API is reachable within a short probe."""
+        global _availability_cache
+        now = dt.datetime.now(dt.timezone.utc).timestamp()
+        if _availability_cache is not None:
+            cached_at, cached_ok = _availability_cache
+            if now - cached_at < _AVAILABILITY_PROBE_TTL_S:
+                return cached_ok
+        try:
+            import requests
+
+            response = requests.get(
+                "https://query1.finance.yahoo.com/v8/finance/chart/AAPL",
+                params={"range": "5d", "interval": "1d"},
+                timeout=3.0,
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            ok = response.ok
+        except Exception as exc:
+            logger.debug("yahoo availability probe failed: %s", exc)
+            ok = False
+        _availability_cache = (now, ok)
+        return ok
 
     def __init__(self) -> None:
         """Initialize the loader (no credentials needed for public data)."""

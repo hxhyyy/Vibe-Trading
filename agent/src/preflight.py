@@ -154,15 +154,39 @@ def _check_okx() -> CheckResult:
         )
 
 
-def _check_yfinance() -> CheckResult:
-    """Check yfinance availability."""
+def _check_us_equity_sources() -> CheckResult:
+    """Check US equity data reachability, preferring domestic fallbacks first."""
+    for source_name, loader_cls in (
+        ("sina", "backtest.loaders.sina_loader"),
+        ("eastmoney", "backtest.loaders.eastmoney_loader"),
+    ):
+        try:
+            import importlib
+
+            module = importlib.import_module(loader_cls)
+            loader = module.DataLoader()
+            if not loader.is_available():
+                continue
+            data = loader.fetch(["AAPL.US"], "2024-06-01", "2024-06-05")
+            frame = data.get("AAPL.US")
+            if frame is not None and not frame.empty:
+                return CheckResult(
+                    name="US Equity",
+                    status="ready",
+                    message=f"reachable via {source_name}",
+                    impact="",
+                )
+        except Exception as exc:
+            logger = __import__("logging").getLogger(__name__)
+            logger.debug("%s preflight probe failed: %s", source_name, exc)
+
     try:
         import yfinance  # noqa: F401
     except ImportError:
         return CheckResult(
-            name="yfinance",
-            status="skipped",
-            message="package not installed",
+            name="US Equity",
+            status="error",
+            message="no domestic fallback and yfinance not installed",
             impact="US/HK equity backtest unavailable",
         )
 
@@ -172,11 +196,11 @@ def _check_yfinance() -> CheckResult:
         ticker = yf.Ticker("AAPL")
         info = ticker.fast_info
         if hasattr(info, "last_price") and info.last_price:
-            return CheckResult(name="yfinance", status="ready", message="reachable", impact="")
-        return CheckResult(name="yfinance", status="ready", message="reachable (no price data)", impact="")
+            return CheckResult(name="US Equity", status="ready", message="reachable via yfinance", impact="")
+        return CheckResult(name="US Equity", status="ready", message="reachable via yfinance (no price data)", impact="")
     except Exception as exc:
         return CheckResult(
-            name="yfinance",
+            name="US Equity",
             status="error",
             message=f"{type(exc).__name__}: {exc}",
             impact="US/HK equity backtest unavailable",
@@ -273,7 +297,7 @@ def run_preflight(console: Optional[Console] = None) -> List[CheckResult]:
     checks = [
         _check_llm_provider,
         _check_okx,
-        _check_yfinance,
+        _check_us_equity_sources,
         _check_tushare,
         _check_akshare,
         _check_ccxt,
