@@ -201,7 +201,7 @@ function AgentTranscript({ agent }: { agent: SwarmAgentStatus }) {
 
   return (
     <div className="flex gap-2">
-      <div className={["flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold", statusTone(agent.status)].join(" ")}>
+      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neutral-800 text-[11px] font-semibold text-neutral-200 dark:bg-neutral-700">
         {initial}
       </div>
       <div className="min-w-0 flex-1">
@@ -211,11 +211,11 @@ function AgentTranscript({ agent }: { agent: SwarmAgentStatus }) {
         </div>
         <div
           ref={bodyRef}
-          className="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-muted/40 px-3 py-2 text-xs leading-relaxed text-foreground"
+          className="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-neutral-900/80 px-3 py-2 text-xs leading-relaxed text-neutral-100 dark:bg-neutral-900/60"
         >
           {agent.transcript}
           {agent.status === "running" && (
-            <span className="inline-block h-3.5 w-0.5 translate-y-0.5 animate-pulse bg-primary" />
+            <span className="inline-block h-3.5 w-0.5 translate-y-0.5 animate-pulse bg-neutral-400" />
           )}
         </div>
       </div>

@@ -43,6 +43,41 @@ function Test-Command([string]$Name) {
     return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+function Get-PortProcess([int]$Port) {
+    $conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $conn) { return $null }
+    return Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+}
+
+# Free a port before starting a server. Kills our own leftover processes
+# (python / vibe-trading / node / uvicorn) automatically so repeated restarts
+# never hit "[WinError 10048] port already in use". A foreign process is left
+# alone with a warning.
+function Clear-Port([int]$Port, [string]$FriendlyName) {
+    $deadline = (Get-Date).AddSeconds(10)
+    while ((Get-Date) -lt $deadline) {
+        $proc = Get-PortProcess $Port
+        if (-not $proc) { return }
+
+        $isOwn = $proc.ProcessName -match '^(python|pythonw|vibe-trading|uvicorn|node)$'
+        if ($isOwn) {
+            Write-Warn "Freeing $FriendlyName port ${Port}: stopping $($proc.ProcessName) (PID $($proc.Id)) ..."
+            try { Stop-Process -Id $proc.Id -Force -ErrorAction Stop } catch { }
+            Start-Sleep -Seconds 2
+        }
+        else {
+            Write-Err "$FriendlyName port $Port is used by $($proc.ProcessName) (PID $($proc.Id)) - not ours, refusing to kill."
+            Write-Err "Free it manually or set a different port, then retry."
+            exit 1
+        }
+    }
+
+    if (Get-PortProcess $Port) {
+        Write-Err "$FriendlyName port $Port is still occupied after cleanup. Aborting."
+        exit 1
+    }
+}
+
 function Ensure-Python {
     if (Test-Path $VenvPython) {
         return
@@ -108,6 +143,7 @@ function Ensure-FrontendDeps {
 function Start-Backend {
     Ensure-Installed
     Ensure-EnvFile
+    Clear-Port $BackendPort "Backend"
     Write-Info "Starting backend on http://127.0.0.1:$BackendPort ..."
     Write-Info "API docs: http://127.0.0.1:$BackendPort/docs"
     Set-Location $AgentDir
@@ -116,6 +152,7 @@ function Start-Backend {
 
 function Start-Frontend {
     Ensure-FrontendDeps
+    Clear-Port $FrontendPort "Frontend"
     $env:VITE_API_URL = "http://127.0.0.1:$BackendPort"
     Write-Info "Starting frontend on http://127.0.0.1:$FrontendPort ..."
     Write-Info "Backend target: $env:VITE_API_URL"
@@ -127,6 +164,8 @@ function Start-Both {
     Ensure-Installed
     Ensure-EnvFile
     Ensure-FrontendDeps
+    Clear-Port $BackendPort "Backend"
+    Clear-Port $FrontendPort "Frontend"
     Write-Info "Starting Vibe-Trading dev (backend + frontend) ..."
     Write-Info "  Web UI : http://127.0.0.1:$FrontendPort"
     Write-Info "  Backend: http://127.0.0.1:$BackendPort"
