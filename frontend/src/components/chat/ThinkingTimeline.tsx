@@ -12,16 +12,12 @@ interface Props {
 
 export const ThinkingTimeline = memo(function ThinkingTimeline({ messages, isLatest = false }: Props) {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(isLatest);
+  const [expanded, setExpanded] = useState(true);
 
   const toolLabel = (tool?: string): string => {
     if (!tool) return t('thinking.processing');
     return localizeToolName(tool);
   };
-
-  useEffect(() => {
-    if (!isLatest) setExpanded(false);
-  }, [isLatest]);
 
   const { steps, hasError, isRunning, totalMs, latestTool, latestThinking } = useMemo(() => {
     let totalMs = 0;
@@ -55,6 +51,10 @@ export const ThinkingTimeline = memo(function ThinkingTimeline({ messages, isLat
       latestThinking,
     };
   }, [messages]);
+
+  useEffect(() => {
+    if (!isLatest && !isRunning) setExpanded(false);
+  }, [isLatest, isRunning]);
 
   const stepCount = steps.length;
   const summaryText = isRunning
