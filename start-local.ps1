@@ -59,7 +59,7 @@ function Clear-Port([int]$Port, [string]$FriendlyName) {
         $proc = Get-PortProcess $Port
         if (-not $proc) { return }
 
-        $isOwn = $proc.ProcessName -match '^(python|pythonw|vibe-trading|uvicorn|node)$'
+        $isOwn = $proc.ProcessName -match '^(python|pythonw|vibe-trading|uvicorn|node)'
         if ($isOwn) {
             Write-Warn "Freeing $FriendlyName port ${Port}: stopping $($proc.ProcessName) (PID $($proc.Id)) ..."
             try { Stop-Process -Id $proc.Id -Force -ErrorAction Stop } catch { }
